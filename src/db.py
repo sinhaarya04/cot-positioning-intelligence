@@ -4,15 +4,18 @@ All data lives in data/cot_intelligence.duckdb
 """
 
 import duckdb
+import os
 from pathlib import Path
+import pandas as pd
 
 DB_PATH = Path(__file__).parent.parent / "data" / "cot_intelligence.duckdb"
 
 
 def get_conn() -> duckdb.DuckDBPyConnection:
     """Return a DuckDB connection, creating the DB file if needed."""
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    return duckdb.connect(str(DB_PATH))
+    path = Path(os.environ.get("COT_DB_PATH") or DB_PATH).expanduser()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return duckdb.connect(str(path))
 
 
 def init_schema():
@@ -123,8 +126,8 @@ def init_schema():
             report_date               DATE NOT NULL,
             market                    VARCHAR NOT NULL,
             -- Core signals
-            cot_index_52w             DOUBLE,    -- percentile rank over 52 weeks
-            cot_index_156w            DOUBLE,    -- percentile rank over 156 weeks (3yr)
+            cot_index_52w             DOUBLE,    -- rolling min-max index over 52 observations
+            cot_index_156w            DOUBLE,    -- rolling min-max index over 156 observations
             z_score_52w               DOUBLE,    -- rolling z-score
             momentum_4w               DOUBLE,    -- 4-week net position change
             -- Advanced signals
@@ -165,8 +168,135 @@ def init_schema():
         );
     """)
 
-    conn.close()
-    print("✅ Schema initialized.")
+    # Additive migrations preserve old databases. Old rows are deliberately
+    # unknown/legacy, never silently promoted to release-aware observations.
+    raw_metadata = {
+        "release_at": "TIMESTAMPTZ", "release_source": "VARCHAR",
+        "release_quality": "VARCHAR DEFAULT 'unknown'",
+        "vintage": "VARCHAR DEFAULT 'latest'", "ingested_at": "TIMESTAMPTZ",
+    }
+    additions = {table: dict(raw_metadata) for table in
+                 ("cot_legacy", "cot_disagg", "cot_tff", "eia_inventory")}
+    additions.update({
+        "futures_prices": {"price_at": "TIMESTAMPTZ", "price_kind": "VARCHAR DEFAULT 'legacy_unknown'",
+                           "source": "VARCHAR", "ingested_at": "TIMESTAMPTZ"},
+        "signals": {"release_at": "TIMESTAMPTZ", "release_quality": "VARCHAR DEFAULT 'unknown'",
+                    "inventory_release_at": "TIMESTAMPTZ", "disagg_release_at": "TIMESTAMPTZ",
+                    "inventory_report_date": "DATE", "data_vintage": "VARCHAR DEFAULT 'latest'",
+                    "analysis_eligible": "BOOLEAN DEFAULT FALSE", "evaluation_version": "VARCHAR DEFAULT 'legacy'"},
+        "backtest_results": {"positive_return_rate": "DOUBLE", "mean_over_std": "DOUBLE",
+                             "baseline_positive_rate": "DOUBLE", "baseline_avg_return": "DOUBLE",
+                             "evaluation_version": "VARCHAR DEFAULT 'legacy'",
+                             "evaluation_start": "DATE", "evaluation_end": "DATE"},
+        "llm_anomalies": {"model_name": "VARCHAR", "model_revision": "VARCHAR",
+                          "prompt_version": "VARCHAR", "generated_at": "TIMESTAMPTZ",
+                          "generation_parameters": "VARCHAR"},
+    })
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        for table, fields in additions.items():
+            existing = {row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()}
+            for name, sql_type in fields.items():
+                if name not in existing:
+                    conn.execute(f'ALTER TABLE "{table}" ADD COLUMN "{name}" {sql_type}')
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+
+
+TABLE_KEYS = {
+    "cot_legacy": ["report_date", "market"],
+    "cot_disagg": ["report_date", "market"],
+    "cot_tff": ["report_date", "market"],
+    "eia_inventory": ["report_date", "commodity"],
+    "futures_prices": ["price_date", "market"],
+    "signals": ["report_date", "market"],
+    "backtest_results": ["market", "signal_name", "horizon", "threshold"],
+    "llm_anomalies": ["report_date", "market"],
+}
+
+
+def write_frame(table: str, frame: pd.DataFrame, mode: str = "upsert", keys=None) -> int:
+    """Validate and atomically replace keys (or a complete derived table).
+
+    Empty input is a no-op, never a destructive replacement. All columns are
+    named explicitly; an insert error rolls the preceding deletion back.
+    """
+    if table not in TABLE_KEYS or mode not in {"upsert", "replace"}:
+        raise ValueError("Unsupported table or write mode")
+    if frame.empty:
+        return 0
+    keys = TABLE_KEYS[table] if keys is None else list(keys)
+    if keys != TABLE_KEYS[table]:
+        raise ValueError(f"Keys must match the primary key for {table}")
+    if not frame.columns.is_unique or not set(keys).issubset(frame.columns):
+        raise ValueError("Missing keys or duplicate input columns")
+    if frame[keys].isna().any().any() or frame.duplicated(keys).any():
+        raise ValueError("Null or duplicate primary keys")
+    conn = get_conn()
+    try:
+        allowed = {row[1] for row in conn.execute(f"PRAGMA table_info('{table}')").fetchall()}
+        unknown = set(frame.columns) - allowed
+        if unknown:
+            raise ValueError(f"Unknown columns for {table}: {sorted(unknown)}")
+        columns = ", ".join(f'"{name}"' for name in frame.columns)
+        conn.register("incoming_rows", frame)
+        conn.execute("BEGIN TRANSACTION")
+        try:
+            incoming = "incoming_rows"
+            metadata = {"release_at", "release_quality", "release_source"}
+            if table in {"cot_legacy", "cot_disagg", "cot_tff", "eia_inventory"} and metadata.issubset(frame.columns):
+                # A normal refresh must not erase a calendar applied previously.
+                # This preserves dates, not first-vintage claims: incoming values
+                # and their vintage/retrieval metadata are still replaced.
+                predicate = " AND ".join(f't."{key}" = s."{key}"' for key in keys)
+                preserve = ("s.release_at IS NULL AND COALESCE(s.release_quality, 'unknown') = 'unknown' "
+                            "AND t.release_quality = 'verified' AND t.release_at IS NOT NULL")
+                selected = ", ".join(
+                    f'CASE WHEN {preserve} THEN t."{name}" ELSE CAST(s."{name}" AS '
+                    f'{"TIMESTAMPTZ" if name == "release_at" else "VARCHAR"}) END AS "{name}"'
+                    if name in metadata else f's."{name}"' for name in frame.columns)
+                conn.execute(f'CREATE TEMP TABLE staged_rows AS SELECT {selected} FROM incoming_rows AS s '
+                             f'LEFT JOIN "{table}" AS t ON {predicate}')
+                incoming = "staged_rows"
+            if table == "futures_prices" and "price_kind" in frame.columns:
+                conflict = conn.execute("""
+                    SELECT COUNT(*) FROM futures_prices AS t JOIN incoming_rows AS s
+                    ON t.market = s.market WHERE t.price_kind = 'contract_settlement'
+                    AND s.price_kind = 'daily_close_proxy'
+                """).fetchone()[0]
+                if conflict:
+                    raise ValueError("Refusing to replace contract settlements with Yahoo proxies")
+                # Old weekly bars have ambiguous timestamps. Remove only these
+                # legacy rows; a truncated new response cannot erase good daily history.
+                conn.execute("""
+                    DELETE FROM futures_prices AS t USING incoming_rows AS s
+                    WHERE t.market = s.market AND s.price_kind = 'daily_close_proxy'
+                    AND t.price_kind = 'legacy_unknown'
+                """)
+            if mode == "replace":
+                conn.execute(f'DELETE FROM "{table}"')
+            else:
+                predicate = " AND ".join(f't."{key}" = s."{key}"' for key in keys)
+                conn.execute(f'DELETE FROM "{table}" AS t USING {incoming} AS s WHERE {predicate}')
+            conn.execute(f'INSERT INTO "{table}" ({columns}) SELECT {columns} FROM {incoming}')
+            raw_table = table in {"cot_legacy", "cot_disagg", "cot_tff", "eia_inventory"}
+            if raw_table:
+                conn.execute("UPDATE signals SET evaluation_version = 'stale', analysis_eligible = FALSE")
+            if raw_table or table in {"signals", "futures_prices"}:
+                conn.execute("UPDATE backtest_results SET evaluation_version = 'stale'")
+            if raw_table or table == "signals":
+                conn.execute("UPDATE llm_anomalies SET prompt_version = 'stale'")
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+    finally:
+        conn.close()
+    return len(frame)
 
 
 # ── Lookup table: market name → CFTC codes ─────────────────────────
@@ -184,4 +314,4 @@ MARKET_CONFIG = {
 
 if __name__ == "__main__":
     init_schema()
-    
+
