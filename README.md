@@ -1,279 +1,148 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.12-blue?style=for-the-badge&logo=python&logoColor=white" />
-  <img src="https://img.shields.io/badge/DuckDB-1.5-yellow?style=for-the-badge&logo=duckdb&logoColor=white" />
-  <img src="https://img.shields.io/badge/Streamlit-1.55-red?style=for-the-badge&logo=streamlit&logoColor=white" />
-  <img src="https://img.shields.io/badge/PyTorch-2.5-orange?style=for-the-badge&logo=pytorch&logoColor=white" />
-  <img src="https://img.shields.io/badge/GPU-V100%2032GB-green?style=for-the-badge&logo=nvidia&logoColor=white" />
-</p>
+# COT Positioning Intelligence
 
-<h1 align="center">📊 COT Positioning Intelligence System</h1>
+An auditable Python pipeline for CFTC positioning data, EIA inventories, descriptive signals, and conditional forward-return analysis across eight commodity markets.
 
-<p align="center">
-  <b>Multi-report CFTC analysis with quantitative signal validation across 40 years of commodity futures data</b>
-</p>
+**Research status:** the old README's numerical performance claims have been withdrawn because they were not supported by a reproducible, correctly timed evaluation. The corrected code is a research foundation. Its current continuous-price analysis is not an executable strategy or evidence of alpha.
 
-<p align="center">
-  <i>Do CFTC positioning extremes actually predict commodity futures returns?</i><br>
-  <i>Short answer: yes, but not the way most people think.</i>
-</p>
+## Working paper and research documents
 
----
+**[What Does a COT Release Add? Public Positioning and Risk in Energy Futures](docs/working-paper.md)** is the current preliminary research-design and methods draft. It separates implemented software from the proposed forecasting experiment. Empirical results remain pending; this is not a completed or peer-reviewed empirical paper.
 
-## 🔍 The Question
+- [Working-paper draft](docs/working-paper.md): research question, related work, hypotheses, proposed methods and outstanding evidence.
+- [Original research proposal (PDF)](docs/research-proposal.pdf): the 15 October 2026 planning brief, preserved as written before the correction pass. Its code-audit roadmap describes the earlier repository state; use this README and the working-paper draft for current implementation status.
+- [Validation record](docs/validation.md): engineering checks and live-data coverage, with no performance claims.
 
-Every Friday, the CFTC publishes the Commitments of Traders report showing how institutional players are positioned across commodity futures. Most traders glance at it. Some build dashboards around it.
+The intended contribution is the incremental forecasting information in a newly released COT report beyond a prespecified public-information baseline. Novelty and publication readiness still require empirical evidence and a fuller review of the closest papers.
 
-**Nobody backtests it.**
+## What the pipeline does
 
-This system ingests 3 CFTC report types across 8 commodity markets, engineers 8 quantitative signals, and rigorously backtests whether positioning extremes predict forward 1-week, 2-week, and 4-week futures returns using 40 years of historical data.
+- Ingests Legacy and Disaggregated **futures-only** COT for gold, silver, crude oil, natural gas, corn, wheat, soybeans and copper. TFF parsing is available, but these physical commodities do not have TFF coverage.
+- Validates required fields, integer counts, identity and position totals; missing source fields cannot silently become zeros. Invalid provider records fail with their market/date.
+- Archives source responses with content hashes, retrieval times and credential redaction.
+- Stores observation dates separately from sourced release timestamps. Missing publication evidence remains unknown; no automatic Tuesday-to-Friday assumption is used.
+- Computes rolling min-max COT indices, z-scores, calendar-based positioning changes, divergence, managed-money positioning, and an exploratory inventory interaction.
+- Evaluates conditional underlying returns using prior-only thresholds and explicit entry/exit dates, with same-period baseline statistics and an event-level audit CSV.
+- Provides a Streamlit dashboard and an optional, strictly validated LLM explanation layer.
 
----
+## Install
 
-## 🚀 Key Findings
-
-### 1. Mean Reversion Works in Precious Metals
-When speculators hit extreme bearish positioning in **Gold**, prices rose **69% of the time** over the next month (Sharpe: 0.49). The commercial-speculative divergence signal is the strongest risk-adjusted predictor in the entire dataset.
-
-### 2. Momentum Works in Agriculture
-The standard advice is "fade the crowd." But when specs are maximally long **Corn**, prices keep going up: **71% hit rate** over 4 weeks. The crowd isn't speculating blindly; they're reacting to real supply constraints that take weeks to resolve.
-
-### 3. Cross-Dataset Signals Work in Energy
-Combining **EIA inventory data** with **CFTC positioning** into a single mismatch score produced a **57% hit rate** and **~4% avg return** in Crude Oil. When physical supply trends contradict speculative sentiment, the mismatch resolves in a tradeable way.
-
-### 4. There Is No Universal COT Rule
-The signal that works in Gold fails in Corn. The signal that works in Crude fails in Copper. **Market-specific calibration is everything.**
-
----
-
-## 📊 Dashboard
-
-<table>
-<tr>
-<td width="50%">
-
-**Positioning Overview**
-- Price + COT Index + Z-Score time series
-- Managed Money net position bars
-- Commercial-Speculative divergence
-- Color-coded latest signals table
-
-</td>
-<td width="50%">
-
-**Backtest Results**
-- Filterable by market, horizon, min hit rate
-- Sharpe ratio heatmap by signal × market
-- Signal effectiveness comparison
-
-</td>
-</tr>
-<tr>
-<td width="50%">
-
-**LLM Anomaly Alerts**
-- GPU-powered analysis via Qwen 2.5 3B
-- Directional bias scoring (-100 to +100)
-- Structured JSON output with confidence scores
-- Anomaly detection: Z > 1.5 or COT Index extremes
-
-</td>
-<td width="50%">
-
-**Signal Table**
-- Full historical signal data per market
-- 8 signals × 8 markets × 40 years
-- Exportable and sortable
-
-</td>
-</tr>
-</table>
-
----
-
-## ⚙️ Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│                   DATA INGESTION                     │
-├──────────────┬──────────────┬───────────────────────┤
-│  CFTC API    │  EIA API     │  Yahoo Finance        │
-│  Legacy COT  │  Petroleum   │  Futures Prices       │
-│  Disagg COT  │  Natural Gas │  8 markets, weekly    │
-│  TFF Report  │  Inventories │  2000–2026            │
-│  1986–2026   │              │                       │
-└──────┬───────┴──────┬───────┴───────────┬───────────┘
-       │              │                   │
-       ▼              ▼                   ▼
-┌─────────────────────────────────────────────────────┐
-│                 DuckDB (Local)                        │
-│  cot_legacy │ cot_disagg │ eia_inventory │ prices    │
-└──────────────────────┬──────────────────────────────┘
-                       │
-                       ▼
-┌─────────────────────────────────────────────────────┐
-│              SIGNAL COMPUTATION                      │
-│                                                      │
-│  COT Index (52w/156w)    │  Managed Money Net        │
-│  Z-Score (52w)           │  Comm-Spec Divergence     │
-│  4-Week Momentum         │  Positioning Acceleration │
-│  Inventory Mismatch *    │                           │
-│                          │  * Energy contracts only  │
-└──────────────────────┬──────────────────────────────┘
-                       │
-              ┌────────┴────────┐
-              ▼                 ▼
-┌──────────────────┐  ┌────────────────────┐
-│    BACKTESTING   │  │   LLM ANOMALY      │
-│                  │  │   DETECTION         │
-│  Forward returns │  │                    │
-│  1w / 2w / 4w    │  │  Qwen 2.5 3B      │
-│  Top/Bot decile  │  │  V100 GPU          │
-│  Hit rate, Sharpe│  │  Structured JSON   │
-└────────┬─────────┘  └────────┬───────────┘
-         │                     │
-         ▼                     ▼
-┌─────────────────────────────────────────────────────┐
-│              STREAMLIT DASHBOARD                     │
-│  Positioning Charts │ Backtest Tables │ LLM Alerts  │
-└─────────────────────────────────────────────────────┘
-```
-
----
-
-## 📈 Backtest Results (Top Signals)
-
-| Market | Signal | Horizon | Threshold | Hit Rate | Avg Return | Sharpe | n |
-|--------|--------|---------|-----------|----------|------------|--------|---|
-| Gold | Comm-Spec Divergence | 4w | Bot Decile | **70.2%** | +2.33% | **0.494** | 134 |
-| Corn | COT Index 52w | 4w | Top Decile | **71.0%** | +3.52% | 0.396 | 131 |
-| Natural Gas | Momentum 4w | 4w | Bot Decile | 60.2% | **+4.34%** | 0.309 | 133 |
-| Crude Oil | Inventory Mismatch | 4w | Top Decile | 57.2% | **+3.96%** | 0.256 | 131 |
-| Soybeans | COT Index 156w | 4w | Top Decile | 65.2% | +2.53% | 0.381 | 132 |
-| Silver | COT Index 52w | 4w | Bot Decile | 66.7% | +2.33% | 0.225 | 132 |
-| Gold | COT Index 52w | 4w | Bot Decile | **68.7%** | +1.72% | 0.375 | 131 |
-
----
-
-## 🛠️ Quick Start
-
-### Prerequisites
-- Python 3.12+
-- NVIDIA GPU (for LLM layer; optional)
-- EIA API key ([free registration](https://www.eia.gov/opendata/register.php))
-
-### Installation
+Python 3.13 is the locked/tested environment; project metadata supports Python 3.12+.
+Run the documented commands from the cloned repository checkout. The current pipeline resolves configuration and provenance files relative to that checkout; standalone wheel deployment is not supported.
 
 ```bash
 git clone https://github.com/sinhaarya04/cot-positioning-intelligence.git
 cd cot-positioning-intelligence
-
-# Create environment
-conda create -p ./env python=3.12 -y
-conda activate ./env
-
-# Install dependencies
-pip install requests pandas numpy duckdb yfinance streamlit plotly scipy \
-            matplotlib transformers torch accelerate sentencepiece python-dotenv
+python3.13 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.lock
+python -m pytest -q
 ```
 
-### Run the Pipeline
+Alternatively, with uv: `uv venv --python 3.13` followed by `uv pip sync requirements.lock`.
+The lockfile includes the application and test dependencies. GPU/model packages are optional: `python -m pip install '.[llm]'` when needed. Optional LLM dependencies are not part of the core lockfile.
+
+## Configuration and publication evidence
+
+The EIA key must be supplied as `EIA_API_KEY` in the environment. Get a replacement from [EIA](https://www.eia.gov/opendata/register.php). A key appeared in earlier commits; **removing it from current source does not revoke it or remove it from Git history**. Rotate/revoke that exposed key through its provider account. Do not paste it into Python files or issue reports.
+
+`.env.example` documents optional variables; it is not loaded automatically. Optional paths are `COT_DB_PATH` and `COT_RAW_DIR`. `COT_START_DATE` restricts CFTC observation history, and `COT_RELEASE_CALENDAR` identifies a sourced CSV with:
+
+| Column | Meaning |
+|---|---|
+| `dataset` | `legacy`, `disagg`, `tff`, or `eia` |
+| `market` | Configured market name; `*` means the same release applies to all markets in that dataset |
+| `report_date` | Observation date in `YYYY-MM-DD` format |
+| `release_at` | Actual publication timestamp with an explicit UTC offset |
+| `source` | URL documenting that publication date/time |
+
+Copy the header-only `config/release_calendar.example.csv` and populate it from verified evidence. Market-specific rows override `*` rows. Duplicate keys, naive timestamps and publication dates before observation dates are rejected. The software checks the format; the supplied source still needs human verification. `release_quality=verified` means evidence was supplied in this calendar, not that the software independently authenticated the URL.
+
+Use the [CFTC release schedule](https://www.cftc.gov/MarketReports/CommitmentsofTraders/ReleaseSchedule/index.htm), [exception announcements](https://www.cftc.gov/MarketReports/CommitmentsofTraders/HistoricalSpecialAnnouncements/index.htm), [EIA petroleum archives](https://www.eia.gov/petroleum/supply/weekly/archive/) and [gas storage reports](https://ir.eia.gov/ngs/ngs.html). Observation-date archives are not release calendars. Holidays and exceptional delays must be recorded explicitly.
+
+Disaggregated reports began publication in September 2009; the 2006-2009 history was backfilled later. Do not assign those observations contemporaneous release dates. Current API values are labelled `latest` vintage even when release dates are known: a sourced date does not establish that a downloaded historical value is the original first release.
 
 ```bash
-# Step 1: Initialize database schema
-python src/db.py
+export COT_RELEASE_CALENDAR=/absolute/path/to/verified-releases.csv
+# Set EIA_API_KEY through your local environment or secret manager.
+```
 
-# Step 2: Ingest CFTC data (3 report types, 8 markets, ~2 min)
-python -m src.ingest_cftc
+Ingestion works without a calendar for descriptive inspection, but corrected evaluation excludes records without release evidence. No guessed calendar is bundled.
 
-# Step 3: Ingest futures prices + EIA inventory data
-# Set your EIA API key in src/ingest_prices.py first
-python -m src.ingest_prices
+## Run
 
-# Step 4: Compute signals (8 signals × 8 markets)
+Full pipeline with an explicit research-era start:
+
+```bash
+python -m src.pipeline --start-date 2009-09-01
+```
+
+For CFTC and prices without EIA credentials:
+
+```bash
+python -m src.pipeline --start-date 2009-09-01 --skip-eia
+```
+
+Without enough verified release history, data/features are saved and the pipeline exits **2** with an actionable message; provider/validation failures exit **1**. Each run writes an `output/run-*.json` manifest with source hash, Git commit, package versions, scope, status and coverage, plus an event audit when signals exist. `--skip-eia` omits the network stage; it does not delete previously ingested inventory.
+
+Individual stages:
+
+```bash
+python -m src.db
+python -m src.ingest_cftc --start-date 2009-09-01
+python -m src.ingest_prices --skip-eia
+python -m src.availability --calendar /absolute/path/to/verified-releases.csv
 python -m src.signals
-
-# Step 5: Run backtest (forward return analysis)
 python -m src.backtest
+streamlit run src/dashboard.py
+```
 
-# Step 6: LLM anomaly detection (requires GPU)
+To ingest EIA too, omit `--skip-eia` after configuring its key. Price ingestion accepts `--markets CRUDE_OIL NATURAL_GAS` for a smaller download. Recompute existing inputs with `python -m src.pipeline --skip-ingest`.
+
+Without `--start-date` or `COT_START_DATE`, CFTC ingestion requests all provider history. One verified upstream issue is a negative nonreportable-long count in crude-oil Legacy data on 1987-02-27. The strict parser rejects it instead of changing it. Restrict scope explicitly or investigate the source; do not silently drop bad observations.
+
+## Evaluation semantics
+
+The names `1w`, `2w`, and `4w` currently mean **5, 10, and 20 later observed daily sessions**. They are retained for display compatibility.
+
+- Yahoo downloads use daily, unadjusted continuous close proxies. Intraday timestamps and contract identities are unavailable. Entry excludes the entire New York publication date and uses the first subsequent daily bar.
+- Timestamped settlement inputs require a timestamp strictly after release. The engine does not implement contract selection or rolled portfolio P&L.
+- Exits are counted from the actual selected entry. Four-calendar-day price-gap checks reject stale/weekly series; they are not a full exchange-calendar validation.
+- Tail thresholds use at least 50 strictly earlier, verified signal observations. Reports released in the same batch cannot set one another's thresholds. At least 10 completed tail outcomes are required for a summary.
+- `positive_return_rate` is the fraction of underlying returns above zero. `mean_over_std` is a descriptive ratio, **not a strategy Sharpe**. Baselines use the same signal's eligible evaluation dates.
+- Missing or nonpositive prices anywhere in a holding window are excluded from percentage-return analysis and recorded in the event audit. A contract-dollar P&L engine is still needed for negative prices.
+- The audit includes release/entry/exit dates, thresholds, source labels and exclusion reasons. Outcomes may overlap; no standard errors, significance claims, costs, margin or portfolio performance are produced.
+
+The 52/156 COT-index windows count available report observations and use rolling min-max normalization, not percentile ranks. Four-week momentum requires the exact earlier calendar observation. Inventory joins use verified publication times backward from the decision time. The inventory interaction is a rolling level z-score multiplied by a positioning z-score; it is **not** an inventory surprise, seasonal tightness estimate or directional crowding signal.
+
+## Data safety and freshness
+
+Schema migrations are additive. Old rows are marked unknown/legacy. Inserts name columns explicitly and replace keys in transactions; failed inserts roll back deletions. Empty writes preserve prior data. A refresh with no new calendar match preserves an existing verified release timestamp.
+
+Successful input changes mark dependent signals, results and explanations stale in the same transaction. The dashboard hides obsolete outputs until they are recomputed. Current results are still descriptive latest-vintage analyses. Original release vintages require a separate archive reconstruction.
+
+The dashboard shows the latest row **per market**, report age, publication quality and dated model outputs. It can start with an empty database. Optional model explanations are excluded from the scientific forecasting test; their directional scores and confidence are uncalibrated opinions. Model packages load only on explicit invocation:
+
+```bash
 python -m src.llm_anomaly
-
-# Step 7: Launch dashboard
-streamlit run src/dashboard.py --server.port 8501
 ```
 
----
+Set `COT_LLM_MODEL_REVISION` to a fixed revision for reproducible model runs. Model name, resolved revision, prompt version, generation settings and timestamp are stored with validated explanations.
 
-## 📁 Project Structure
+## Research work still required
 
-```
-cot-positioning-intelligence/
-├── data/
-│   └── cot_intelligence.duckdb      # All data (auto-generated)
-├── src/
-│   ├── __init__.py
-│   ├── db.py                        # Schema + market config
-│   ├── ingest_cftc.py               # CFTC Socrata API ingestion
-│   ├── ingest_prices.py             # Yahoo Finance + EIA API
-│   ├── signals.py                   # Signal computation engine
-│   ├── backtest.py                  # Forward return backtesting
-│   ├── llm_anomaly.py              # Qwen 2.5 3B anomaly detection
-│   └── dashboard.py                 # Streamlit dashboard
-├── output/
-├── .gitignore
-└── README.md
-```
+1. Reconstruct and audit release calendars and original data vintages, with documented uncertainty.
+2. Obtain contract-level price, expiry, multiplier and curve data with appropriate usage rights.
+3. Implement seasonal inventory tightness, price/curve/volatility baselines and the prespecified incremental-COT quantile experiment.
+4. Add chronological model selection, dependence-aware uncertainty, cost/roll accounting and prospective forecast records.
+5. Generate reproducible manuscript tables and figures. No prior numerical performance claim should be reused without re-estimation.
 
----
+## Layout
 
-## 🔬 Signal Definitions
+`src/availability.py` validates release calendars; `src/provenance.py` archives responses;
+`src/ingest_cftc.py` and `src/ingest_prices.py` ingest inputs; `src/db.py` manages schema and transactional writes;
+`src/signals.py` is the single signal implementation; `src/backtest.py` produces descriptive evaluations;
+`src/pipeline.py` saves run manifests; `src/dashboard.py` displays results; `src/llm_anomaly.py` is optional.
+Root `signals.py` is a compatibility wrapper. `tests/` contains offline regression and Streamlit smoke tests.
 
-| Signal | Source | Description |
-|--------|--------|-------------|
-| **COT Index (52w/156w)** | Legacy COT | Percentile rank of net speculative position over rolling window (0–100) |
-| **Z-Score (52w)** | Legacy COT | Standard deviations from rolling mean of net speculative position |
-| **Momentum (4w)** | Legacy COT | 4-week change in net speculative contracts |
-| **Comm-Spec Divergence** | Legacy COT | Commercial vs speculative net position spread, normalized by open interest |
-| **Positioning Acceleration** | Legacy COT | Second derivative of net positioning (change in momentum) |
-| **Managed Money Net** | Disagg COT | Hedge fund/CTA net position from disaggregated report |
-| **Inventory Mismatch** | EIA + CFTC | Product of inventory Z-score and positioning Z-score (energy only) |
-
----
-
-## ⚠️ Limitations
-
-- **No transaction costs**: Returns are gross of trading costs, slippage, and roll costs
-- **Look-ahead in thresholds**: Top/bottom decile computed over full sample (walk-forward would be more rigorous)
-- **Weekly granularity**: COT data is as-of Tuesday, released Friday; intraweek moves not captured
-- **No regime adjustment**: All market environments treated equally
-- **LLM narratives**: Qwen 2.5 3B occasionally produces inconsistent reasoning; use quantitative signals as primary
-
----
-
-## 🗺️ Future Work
-
-- Walk-forward backtest to eliminate look-ahead bias
-- Cross-commodity positioning correlation matrix
-- TFF report integration (Treasury bonds, S&P 500, EUR/USD)
-- Automated weekly email digest via cron
-- Alpha decay analysis (how fast do COT signals degrade after publication?)
-
----
-
-## 🏗️ Built With
-
-| Component | Technology |
-|-----------|-----------|
-| Database | DuckDB 1.5 (columnar, local) |
-| Data | CFTC Socrata API, EIA API v2, Yahoo Finance |
-| Signals | Pandas, NumPy, SciPy |
-| LLM | Qwen 2.5 3B Instruct (HuggingFace Transformers) |
-| GPU | NVIDIA Tesla V100 32GB |
-| Dashboard | Streamlit + Plotly |
-| Compute | Northeastern University Explorer HPC Cluster |
-
----
-
-<p align="center">
-  Built by <a href="https://linkedin.com/in/sinhaarya04">Aryan Sinha</a> · Northeastern University
-</p>
+CI runs the locked Python 3.13 test suite. To refresh the lock deliberately:
+`uv pip compile pyproject.toml --extra dev --python-version 3.13 --output-file requirements.lock`.

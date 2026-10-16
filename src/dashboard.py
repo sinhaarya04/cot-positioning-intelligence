@@ -1,331 +1,240 @@
-"""
-Streamlit dashboard for COT Positioning Intelligence System.
-Run: streamlit run src/dashboard.py --server.port 8501
-"""
+"""Streamlit research dashboard: streamlit run src/dashboard.py."""
 
-import streamlit as st
-import pandas as pd
-import plotly.graph_objects as go
-from plotly.subplots import make_subplots
+import json
 import sys
 from pathlib import Path
 
-# Add project root to path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-from src.db import get_conn, MARKET_CONFIG
+import pandas as pd
+import plotly.graph_objects as go
+import streamlit as st
+from plotly.subplots import make_subplots
 
-st.set_page_config(
-    page_title="COT Positioning Intelligence",
-    page_icon="📊",
-    layout="wide"
-)
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.db import MARKET_CONFIG, get_conn, init_schema
+from src.llm_anomaly import PROMPT_VERSION, validate_response
 
-st.title("📊 COT Positioning Intelligence System")
-st.caption("Multi-report CFTC positioning analysis with signal validation")
+EVALUATION_VERSION = "release_aware_v1"
+STALE_AFTER_DAYS = 14
 
 
-@st.cache_data(ttl=300)
+def _load_table(table):
+    if table not in {"signals", "futures_prices", "backtest_results", "llm_anomalies"}:
+        raise ValueError("Unsupported dashboard table")
+    conn = get_conn()
+    try:
+        return conn.execute(f"SELECT * FROM {table}").fetchdf()
+    finally:
+        conn.close()
+
+
 def load_signals():
-    conn = get_conn()
-    df = conn.execute("SELECT * FROM signals ORDER BY market, report_date").fetchdf()
-    conn.close()
-    df["report_date"] = pd.to_datetime(df["report_date"])
-    return df
+    frame = _load_table("signals")
+    frame["report_date"] = pd.to_datetime(frame["report_date"])
+    frame = frame[frame["evaluation_version"].eq(EVALUATION_VERSION)]
+    return frame.sort_values(["market", "report_date"])
 
 
-@st.cache_data(ttl=300)
 def load_prices():
-    conn = get_conn()
-    df = conn.execute("SELECT * FROM futures_prices ORDER BY market, price_date").fetchdf()
-    conn.close()
-    df["price_date"] = pd.to_datetime(df["price_date"])
-    return df
+    frame = _load_table("futures_prices")
+    frame["price_date"] = pd.to_datetime(frame["price_date"])
+    # Old Monday-labelled weekly bars cannot be presented as daily prices.
+    if "price_kind" not in frame:
+        return frame.iloc[:0].copy()
+    frame = frame[frame["price_kind"].isin(["daily_close_proxy", "contract_settlement"])]
+    return frame.sort_values(["market", "price_date"])
 
 
-@st.cache_data(ttl=300)
+def validated_backtest_results(frame):
+    """Never present legacy hit-rate/Sharpe fields as corrected evaluation."""
+    if "evaluation_version" not in frame:
+        return frame.iloc[:0].copy()
+    return frame[frame["evaluation_version"].eq(EVALUATION_VERSION)].copy()
+
+
 def load_backtest():
-    conn = get_conn()
-    df = conn.execute("SELECT * FROM backtest_results").fetchdf()
-    conn.close()
-    return df
+    return validated_backtest_results(_load_table("backtest_results"))
 
 
-@st.cache_data(ttl=300)
 def load_anomalies():
-    conn = get_conn()
-    df = conn.execute("SELECT * FROM llm_anomalies ORDER BY report_date DESC, market").fetchdf()
-    conn.close()
-    return df
+    frame = _load_table("llm_anomalies")
+    return frame.sort_values(["report_date", "market"], ascending=[False, True])
 
 
-@st.cache_data(ttl=300)
+def latest_per_market(frame):
+    if frame.empty:
+        return frame.copy()
+    return frame.sort_values("report_date").drop_duplicates("market", keep="last").sort_values("market")
+
+
 def load_latest_signals():
-    conn = get_conn()
-    df = conn.execute("""
-        SELECT * FROM signals
-        WHERE report_date = (SELECT MAX(report_date) FROM signals)
-        ORDER BY market
-    """).fetchdf()
-    conn.close()
-    return df
+    return latest_per_market(load_signals())
 
 
-# ── Sidebar ──
-st.sidebar.header("Controls")
-signals = load_signals()
-markets = list(MARKET_CONFIG.keys())
-selected_market = st.sidebar.selectbox("Select Market", markets, index=0)
-
-lookback = st.sidebar.slider("Lookback (weeks)", 52, 520, 156, step=52)
-
-# ── Tab Layout ──
-tab1, tab2, tab3, tab4 = st.tabs([
-    "📡 Positioning Overview",
-    "📊 Backtest Results", 
-    "🤖 LLM Anomaly Alerts",
-    "📋 Signal Table"
-])
+def add_freshness(frame, now=None):
+    """Expose calendar age and relative ingestion lag; age >14 days is flagged."""
+    frame = frame.copy()
+    dates = pd.to_datetime(frame["report_date"], utc=True).dt.normalize()
+    current = pd.Timestamp.now(tz="UTC") if now is None else pd.Timestamp(now)
+    current = current.tz_localize("UTC") if current.tzinfo is None else current.tz_convert("UTC")
+    frame["report_age_days"] = (current.normalize() - dates).dt.days
+    frame["lag_vs_latest_days"] = (dates.max() - dates).dt.days
+    frame["freshness"] = "Recent observation"
+    frame.loc[frame["lag_vs_latest_days"].gt(0), "freshness"] = "Lagging other markets"
+    frame.loc[frame["report_age_days"].gt(STALE_AFTER_DAYS), "freshness"] = "Stale observation"
+    frame.loc[frame["report_age_days"].lt(0), "freshness"] = "Future observation date"
+    return frame
 
 
-# ══════════════════════════════════════════════════════════════
-# TAB 1: Positioning Overview
-# ══════════════════════════════════════════════════════════════
-with tab1:
-    st.header(f"{selected_market} — Positioning History")
-    
-    mkt_sig = signals[signals["market"] == selected_market].copy()
-    mkt_sig = mkt_sig[mkt_sig["report_date"] >= mkt_sig["report_date"].max() - pd.Timedelta(weeks=lookback)]
-    
+def valid_anomaly_rows(frame):
+    """Hide unvalidated legacy and malformed stored model output."""
+    valid = []
+    for _, row in frame.iterrows():
+        if not isinstance(row.get("prompt_version"), str) or row["prompt_version"] != PROMPT_VERSION:
+            continue
+        try:
+            payload = {
+                "market": row["market"],
+                "report_date": pd.Timestamp(row["report_date"]).date().isoformat(),
+                "signal_type": row["signal_type"],
+                "directional_bias": row["directional_bias"],
+                "confidence": row["confidence"],
+                "narrative": row["narrative"],
+            }
+            # DuckDB integer columns yield numpy integer scalars, unlike JSON.
+            bias = payload["directional_bias"]
+            if pd.notna(bias) and not isinstance(bias, bool) and int(bias) == bias:
+                payload["directional_bias"] = int(bias)
+            validate_response(json.dumps(payload), row["market"], row["report_date"])
+            valid.append(row)
+        except (ValueError, TypeError, OverflowError):
+            continue
+    return pd.DataFrame(valid, columns=frame.columns)
+
+
+def _show_history(signals, prices, market, lookback):
+    st.header(f"{market} - Positioning History")
+    sample = signals[signals["market"].eq(market)].copy()
+    if sample.empty:
+        st.info("No signals for this market. Ingest source data and run python -m src.signals.")
+        return
+    cutoff = sample["report_date"].max() - pd.Timedelta(weeks=lookback)
+    sample = sample[sample["report_date"].ge(cutoff)]
+    price_sample = prices[prices["market"].eq(market) & prices["price_date"].ge(cutoff)]
+    if price_sample.empty:
+        st.info("No current daily price data for this period. Legacy bars with unknown timing are hidden; run price ingestion.")
+    fig = make_subplots(rows=3, cols=1, shared_xaxes=True,
+                        subplot_titles=("Daily price proxy", "COT index (52-report min-max)", "Z-score (52-report)"))
+    fig.add_trace(go.Scatter(x=price_sample["price_date"], y=price_sample["close_price"], name="Price proxy"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=sample["report_date"], y=sample["cot_index_52w"], name="COT index"), row=2, col=1)
+    fig.add_trace(go.Bar(x=sample["report_date"], y=sample["z_score_52w"], name="Z-score"), row=3, col=1)
+    fig.update_layout(height=650, showlegend=False)
+    st.plotly_chart(fig, width="stretch")
+    st.caption("Positioning is plotted on its observation date. That date is earlier than publication; charts are descriptive.")
+    st.subheader("Managed money and commercial-speculative divergence")
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True)
+    fig.add_trace(go.Bar(x=sample["report_date"], y=sample["mgd_money_net"], name="Managed-money net contracts"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=sample["report_date"], y=sample["comm_spec_divergence"], name="Commercial-speculative divergence"), row=2, col=1)
+    fig.update_layout(height=450)
+    st.plotly_chart(fig, width="stretch")
+
+
+def _show_backtest(markets):
+    st.header("Conditional underlying-return statistics")
+    st.caption("These are exploratory forward returns conditioned on past-defined signal thresholds. "
+               "They are not a trading strategy, a strategy hit rate, or a portfolio Sharpe ratio. "
+               "Overlapping horizons and multiple comparisons require further inference.")
+    raw = _load_table("backtest_results")
+    results = validated_backtest_results(raw)
+    if len(raw) > len(results):
+        st.warning(f"Hidden {len(raw) - len(results)} legacy evaluation rows. Recompute with python -m src.backtest.")
+    if results.empty:
+        st.info("No corrected evaluations available. Release metadata and daily prices are required before running python -m src.backtest.")
+        return
+    left, right = st.columns(2)
+    market = left.selectbox("Market", ["ALL"] + markets, key="bt_market")
+    horizon = right.selectbox("Horizon", ["ALL", "1w", "2w", "4w"], key="bt_horizon")
+    if market != "ALL":
+        results = results[results["market"].eq(market)]
+    if horizon != "ALL":
+        results = results[results["horizon"].eq(horizon)]
+    columns = ["market", "signal_name", "horizon", "threshold", "n_signals", "positive_return_rate",
+               "baseline_positive_rate", "avg_return", "baseline_avg_return", "mean_over_std",
+               "evaluation_start", "evaluation_end", "evaluation_version"]
+    display = results[[col for col in columns if col in results]].rename(columns={
+        "positive_return_rate": "Positive underlying-return fraction",
+        "baseline_positive_rate": "Baseline positive-return fraction (eligible dates)",
+        "avg_return": "Mean underlying return",
+        "baseline_avg_return": "Baseline mean return (eligible dates)",
+        "mean_over_std": "Mean / standard deviation (unannualized)",
+    })
+    st.dataframe(display, width="stretch", hide_index=True)
+
+
+def _show_anomalies():
+    st.header("Optional LLM positioning explanations")
+    st.caption("Model interpretations and self-rated confidence are unvalidated. They are not calibrated probabilities or return forecasts.")
+    raw = load_anomalies()
+    frame = valid_anomaly_rows(raw)
+    if len(frame) < len(raw):
+        st.warning(f"Hidden {len(raw) - len(frame)} older or invalid model outputs. Regenerate explanations with the current validator.")
+    if frame.empty:
+        st.info("No validated explanations available. Optional command: python -m src.llm_anomaly (requires the LLM dependencies and model).")
+        return
+    show_history = st.checkbox("Show historical explanations", value=False)
+    if not show_history:
+        frame = latest_per_market(frame)
+    frame = add_freshness(frame)
+    for _, row in frame.iterrows():
+        report_date = pd.Timestamp(row["report_date"]).date().isoformat()
+        title = f"{row['market']} | observed {report_date} | {row['freshness']} ({row['report_age_days']} days old)"
+        with st.expander(title, expanded=False):
+            st.write(f"Positioning interpretation: {int(row['directional_bias']):+d}; self-rated confidence: {row['confidence']:.0%}; classification: {row['signal_type']}")
+            st.write(row["narrative"])
+            st.caption(f"Generated: {row.get('generated_at', 'unknown')} | Model: {row.get('model_name', 'unknown')} | Revision: {row.get('model_revision', 'unknown')}")
+
+
+def main():
+    st.set_page_config(page_title="COT Positioning Research", page_icon="📊", layout="wide")
+    init_schema()
+    st.title("COT Positioning Research")
+    st.caption("Exploratory public-data research; corrected evaluation is still subject to data quality and vintage limitations.")
+    st.warning("Yahoo daily futures prices are proxies without explicit contract rolls or trading costs. "
+               "Current API history can contain revisions; unknown publication times and unknown original vintages do not establish point-in-time research validity.")
+    signals = load_signals()
+    hidden_signals = len(_load_table("signals")) - len(signals)
+    if hidden_signals:
+        st.warning(f"Hidden {hidden_signals} legacy or stale signal rows. Recompute with python -m src.signals after source updates.")
     prices = load_prices()
-    mkt_px = prices[prices["market"] == selected_market].copy()
-    mkt_px = mkt_px[mkt_px["price_date"] >= mkt_sig["report_date"].min()]
-    
-    # ── Price + COT Index Chart ──
-    fig = make_subplots(
-        rows=3, cols=1, shared_xaxes=True,
-        row_heights=[0.4, 0.3, 0.3],
-        vertical_spacing=0.05,
-        subplot_titles=("Price", "COT Index (52w)", "Z-Score (52w)")
-    )
-    
-    # Price
-    fig.add_trace(go.Scatter(
-        x=mkt_px["price_date"], y=mkt_px["close_price"],
-        name="Price", line=dict(color="#2196F3", width=1.5)
-    ), row=1, col=1)
-    
-    # COT Index
-    fig.add_trace(go.Scatter(
-        x=mkt_sig["report_date"], y=mkt_sig["cot_index_52w"],
-        name="COT Index 52w", line=dict(color="#4CAF50", width=1.5)
-    ), row=2, col=1)
-    
-    fig.add_hline(y=80, line_dash="dash", line_color="red", opacity=0.5, row=2, col=1)
-    fig.add_hline(y=20, line_dash="dash", line_color="green", opacity=0.5, row=2, col=1)
-    
-    # Z-Score
-    fig.add_trace(go.Bar(
-        x=mkt_sig["report_date"], y=mkt_sig["z_score_52w"],
-        name="Z-Score 52w",
-        marker_color=mkt_sig["z_score_52w"].apply(
-            lambda x: "#EF5350" if x > 1.5 else "#66BB6A" if x < -1.5 else "#90A4AE"
-        )
-    ), row=3, col=1)
-    
-    fig.add_hline(y=1.5, line_dash="dash", line_color="red", opacity=0.5, row=3, col=1)
-    fig.add_hline(y=-1.5, line_dash="dash", line_color="green", opacity=0.5, row=3, col=1)
-    
-    fig.update_layout(height=700, showlegend=False, margin=dict(t=30, b=30))
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # ── Managed Money + Commercial Divergence ──
-    st.subheader("Managed Money & Commercial-Speculative Divergence")
-    
-    fig2 = make_subplots(
-        rows=2, cols=1, shared_xaxes=True,
-        row_heights=[0.5, 0.5],
-        vertical_spacing=0.08,
-        subplot_titles=("Managed Money Net Position", "Commercial-Speculative Divergence")
-    )
-    
-    mgd_data = mkt_sig[mkt_sig["mgd_money_net"].notna()]
-    fig2.add_trace(go.Bar(
-        x=mgd_data["report_date"], y=mgd_data["mgd_money_net"],
-        name="Managed Money Net",
-        marker_color=mgd_data["mgd_money_net"].apply(
-            lambda x: "#2196F3" if x > 0 else "#EF5350"
-        )
-    ), row=1, col=1)
-    
-    div_data = mkt_sig[mkt_sig["comm_spec_divergence"].notna()]
-    fig2.add_trace(go.Scatter(
-        x=div_data["report_date"], y=div_data["comm_spec_divergence"],
-        name="Comm-Spec Divergence", line=dict(color="#FF9800", width=1.5),
-        fill="tozeroy", fillcolor="rgba(255, 152, 0, 0.1)"
-    ), row=2, col=1)
-    
-    fig2.update_layout(height=500, showlegend=False, margin=dict(t=30, b=30))
-    st.plotly_chart(fig2, use_container_width=True)
-    
-    # ── Latest Signals Summary ──
-    st.subheader("Latest Signals — All Markets")
-    latest = load_latest_signals()
-    
-    # Color-code the dataframe
-    st.dataframe(
-        latest[[
-            "market", "report_date", "cot_index_52w", "cot_index_156w",
-            "z_score_52w", "momentum_4w", "mgd_money_net",
-            "comm_spec_divergence", "inventory_mismatch"
-        ]].style.background_gradient(
-            subset=["cot_index_52w"], cmap="RdYlGn", vmin=0, vmax=100
-        ).background_gradient(
-            subset=["z_score_52w"], cmap="RdYlGn_r", vmin=-3, vmax=3
-        ).format({
-            "cot_index_52w": "{:.1f}",
-            "cot_index_156w": "{:.1f}",
-            "z_score_52w": "{:+.2f}",
-            "momentum_4w": "{:+,.0f}",
-            "mgd_money_net": "{:+,.0f}",
-            "comm_spec_divergence": "{:+.4f}",
-            "inventory_mismatch": "{:.2f}",
-        }),
-        use_container_width=True,
-        hide_index=True
-    )
+    markets = list(MARKET_CONFIG)
+    st.sidebar.header("Controls")
+    market = st.sidebar.selectbox("Select Market", markets)
+    lookback = st.sidebar.slider("Lookback (weeks)", 52, 520, 156, step=52)
+    tabs = st.tabs(["Positioning Overview", "Conditional Returns", "LLM Explanations", "Signal Table"])
+    with tabs[0]:
+        _show_history(signals, prices, market, lookback)
+        st.subheader("Latest observation for every available market")
+        latest = add_freshness(latest_per_market(signals))
+        missing = sorted(set(markets) - set(latest["market"]))
+        if missing:
+            st.info("No observations available: " + ", ".join(missing))
+        columns = ["market", "report_date", "release_at", "release_quality", "data_vintage", "analysis_eligible",
+                   "report_age_days", "lag_vs_latest_days", "freshness", "cot_index_52w", "z_score_52w",
+                   "mgd_money_net", "disagg_release_at", "inventory_report_date", "inventory_release_at"]
+        st.dataframe(latest[[col for col in columns if col in latest]], width="stretch", hide_index=True)
+        st.caption(f"Stale means observation age exceeds {STALE_AFTER_DAYS} calendar days. Lag is relative to the newest market in this database; neither guarantees successful ingestion.")
+        if not latest.empty and "release_at" in latest:
+            st.caption(f"Publication timestamps known for {latest['release_at'].notna().sum()} of {len(latest)} latest market observations. Inspect release quality and vintage before research use.")
+    with tabs[1]:
+        _show_backtest(markets)
+    with tabs[2]:
+        _show_anomalies()
+    with tabs[3]:
+        st.header("Full signal history")
+        selected = st.selectbox("Market", markets, key="signal_market")
+        st.dataframe(signals[signals["market"].eq(selected)].sort_values("report_date", ascending=False).head(100),
+                     width="stretch", hide_index=True)
+    st.sidebar.caption("Sources: CFTC legacy and disaggregated reports; EIA inventories; Yahoo Finance price proxies. LLM explanations are optional.")
 
 
-# ══════════════════════════════════════════════════════════════
-# TAB 2: Backtest Results
-# ══════════════════════════════════════════════════════════════
-with tab2:
-    st.header("Backtest Results — Do COT Signals Predict Returns?")
-    
-    bt = load_backtest()
-    
-    if bt.empty:
-        st.warning("No backtest results found. Run `python -m src.backtest` first.")
-    else:
-        # Filters
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            bt_market = st.selectbox("Market", ["ALL"] + markets, key="bt_market")
-        with col2:
-            bt_horizon = st.selectbox("Horizon", ["ALL", "1w", "2w", "4w"], key="bt_horizon")
-        with col3:
-            min_hit = st.slider("Min Hit Rate", 0.4, 0.75, 0.55, step=0.05)
-        
-        filtered = bt.copy()
-        if bt_market != "ALL":
-            filtered = filtered[filtered["market"] == bt_market]
-        if bt_horizon != "ALL":
-            filtered = filtered[filtered["horizon"] == bt_horizon]
-        filtered = filtered[filtered["hit_rate"] >= min_hit]
-        filtered = filtered.sort_values("sharpe", ascending=False)
-        
-        st.dataframe(
-            filtered.style.background_gradient(
-                subset=["hit_rate"], cmap="Greens", vmin=0.4, vmax=0.75
-            ).background_gradient(
-                subset=["sharpe"], cmap="RdYlGn", vmin=-0.5, vmax=0.5
-            ).format({
-                "hit_rate": "{:.1%}",
-                "avg_return": "{:+.4f}",
-                "sharpe": "{:+.3f}",
-            }),
-            use_container_width=True,
-            hide_index=True
-        )
-        
-        # ── Heatmap: Signal effectiveness by market ──
-        st.subheader("Signal Sharpe Ratio Heatmap (4-week horizon, top decile)")
-        
-        heatmap_data = bt[
-            (bt["horizon"] == "4w") & (bt["threshold"] == "top_decile")
-        ].pivot_table(
-            values="sharpe", index="market", columns="signal_name", aggfunc="first"
-        )
-        
-        if not heatmap_data.empty:
-            fig_heat = go.Figure(data=go.Heatmap(
-                z=heatmap_data.values,
-                x=heatmap_data.columns,
-                y=heatmap_data.index,
-                colorscale="RdYlGn",
-                zmid=0,
-                text=heatmap_data.values.round(3),
-                texttemplate="%{text}",
-                textfont={"size": 11},
-            ))
-            fig_heat.update_layout(height=400, margin=dict(t=10, b=10))
-            st.plotly_chart(fig_heat, use_container_width=True)
-
-
-# ══════════════════════════════════════════════════════════════
-# TAB 3: LLM Anomaly Alerts
-# ══════════════════════════════════════════════════════════════
-with tab3:
-    st.header("🤖 LLM Anomaly Alerts")
-    
-    anomalies = load_anomalies()
-    
-    if anomalies.empty:
-        st.warning("No anomaly analyses found. Run `python -m src.llm_anomaly` on a GPU node first.")
-    else:
-        for _, row in anomalies.iterrows():
-            bias = row.get("directional_bias", 0)
-            confidence = row.get("confidence", 0)
-            
-            if bias > 50:
-                emoji, color = "📈", "green"
-            elif bias < -50:
-                emoji, color = "📉", "red"
-            else:
-                emoji, color = "➡️", "orange"
-            
-            with st.expander(
-                f"{emoji} {row['market']} — Bias: {bias:+d} | "
-                f"Confidence: {confidence:.0%} | {row.get('signal_type', 'N/A')}",
-                expanded=True
-            ):
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Directional Bias", f"{bias:+d}")
-                col2.metric("Confidence", f"{confidence:.0%}")
-                col3.metric("Historical Hit Rate", f"{row.get('historical_hit_rate', 0):.1%}")
-                
-                st.markdown(f"**Analysis:** {row.get('narrative', 'N/A')}")
-
-
-# ══════════════════════════════════════════════════════════════
-# TAB 4: Raw Signal Table
-# ══════════════════════════════════════════════════════════════
-with tab4:
-    st.header("📋 Full Signal History")
-    
-    mkt_filter = st.selectbox("Market", markets, key="sig_table_market")
-    
-    mkt_data = signals[signals["market"] == mkt_filter].sort_values("report_date", ascending=False)
-    
-    st.dataframe(
-        mkt_data.head(100).style.format({
-            "cot_index_52w": "{:.1f}",
-            "cot_index_156w": "{:.1f}",
-            "z_score_52w": "{:+.2f}",
-            "momentum_4w": "{:+,.0f}",
-            "mgd_money_net": "{:+,.0f}",
-            "comm_spec_divergence": "{:+.4f}",
-            "positioning_acceleration": "{:+,.0f}",
-            "inventory_mismatch": "{:.2f}",
-        }),
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-# ── Footer ──
-st.sidebar.markdown("---")
-st.sidebar.markdown("**Data Sources**")
-st.sidebar.markdown("- CFTC Commitments of Traders")
-st.sidebar.markdown("- EIA Petroleum & Natural Gas")
-st.sidebar.markdown("- Yahoo Finance (prices)")
-st.sidebar.markdown(f"- LLM: Qwen 2.5 3B Instruct")
+if __name__ == "__main__":
+    main()
