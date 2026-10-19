@@ -2,7 +2,7 @@
 
 **Aryan Sinha**
 
-**Preliminary research design and methods draft - 16 October 2026 (UTC)**
+**Preliminary research design and methods draft - 16 October 2026 (UTC); data-acquisition update 18 October 2026 (America/New_York)**
 
 **Status:** This document specifies a proposed empirical study. It contains no completed forecasting experiment, estimated economic effect, or evidence of trading profitability. It has not been submitted or peer reviewed. The accompanying code currently implements data ingestion, availability checks and descriptive evaluation; the proposed forecasting study remains to be implemented.
 
@@ -67,6 +67,8 @@ The corrected repository implements strict source-field validation, transactiona
 The current engine produces descriptive conditional underlying-return summaries. It does **not** implement the M0-M2 experiment, seasonal tightness, contract-level dollar outcomes, dependence-aware inference, or a costed portfolio. Continuous Yahoo close proxies lack the contract identity needed for the proposed design. Nonpositive-price windows are currently excluded, not economically modeled.
 
 The subsequent [research-data audit](research-data-audit.md) adds a bounded publication-evidence ledger and read-only coverage diagnostics. It does not establish a complete common sample or change evaluation eligibility. Current crude inventory is the national commercial-stock series; the proposed Cushing seasonal-state test requires a separate series. Archived gas issues also demonstrate revisions, so publication dates and original values require separate verification.
+
+The data-acquisition extension provides reproducible CFTC notice and EIA archive extraction, explicitly separating official index evidence from verified issue headers and recording unavailable or contradictory documents. CFTC actual-publication coverage and gas-release coverage remain sparse. A separate contract importer preserves signed settlements, original export bytes and checksums; its validation is not an exchange-calendar or first-vintage certification. The [Bloomberg lab protocol](bloomberg-export-guide.md) starts with six individual 2020 contracts before a broader historical request. An existing local natural-gas workbook has individual securities but lacks verified price-field and expiry metadata, so its values have not entered an experiment.
 
 The correction pass passed **141 offline tests**. A local engineering validation run, `20261016T014316Z-934738f8`, recorded:
 

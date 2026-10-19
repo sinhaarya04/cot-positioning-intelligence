@@ -11,7 +11,8 @@ An auditable Python pipeline for CFTC positioning data, EIA inventories, descrip
 - [Working-paper draft](docs/working-paper.md): research question, related work, hypotheses, proposed methods and outstanding evidence.
 - [Original research proposal (PDF)](docs/research-proposal.pdf): the 15 October 2026 planning brief, preserved as written before the correction pass. Its code-audit roadmap describes the earlier repository state; use this README and the working-paper draft for current implementation status.
 - [Validation record](docs/validation.md): engineering checks and live-data coverage, with no performance claims.
-- [Research-data audit](docs/research-data-audit.md): a sourced release-evidence pilot, reproducible coverage diagnostics, vintage limitations and contract-data requirements.
+- [Research-data audit](docs/research-data-audit.md): expanded release evidence, reproducible coverage diagnostics, vintage limitations and contract-data requirements.
+- [Bloomberg lab guide](docs/bloomberg-export-guide.md): a six-contract settlement pilot, field verification, export schemas and the import command.
 
 The intended contribution is the incremental forecasting information in a newly released COT report beyond a prespecified public-information baseline. Novelty and publication readiness still require empirical evidence and a fuller review of the closest papers.
 
@@ -71,7 +72,7 @@ Ingestion works without a calendar for descriptive inspection, but corrected eva
 
 ### Audit partial evidence without changing the database
 
-The separate curated ledgers in `config/release_evidence_*.csv` distinguish confirmed publication dates, secondary-document available-by bounds, schedules and superseded schedules. They are a small audit pilot, **not** a complete release calendar. All currently bundled evidence is date-only; none is promoted to a timestamp or to backtest eligibility.
+The separate curated ledgers in `config/release_evidence_*.csv` distinguish confirmed publication dates, secondary-document available-by bounds, schedules and superseded schedules. Coverage remains partial, especially for CFTC and gas inventories. All currently bundled evidence is date-only; none is promoted to a timestamp or to backtest eligibility.
 
 After ingestion, audit an existing, checkpointed database:
 
@@ -82,6 +83,24 @@ python -m src.research_audit --db data/cot_intelligence.duckdb
 The command opens the database read-only and writes `research-audit.json`, `research-audit.md` and `release-coverage.csv` under `output/research-audit/`. Use `--evidence path/to/ledger.csv` for alternative ledgers and `--output-dir` for another destination. A successful exit means the diagnostic completed; it does not establish research readiness. The evidence format is separate from `COT_RELEASE_CALENDAR` and must not be used as a replacement for its exact timestamps.
 
 The [audit findings](docs/research-data-audit.md) include the current national-crude versus proposed Cushing-series mismatch and a documented gas-inventory revision. The [contract-data specification](docs/contract-data-feasibility.md) records the price-panel fields and access still needed for the proposed experiment.
+
+The [CFTC source review](docs/cftc-release-evidence.md) and [EIA source review](docs/eia-release-evidence.md) document reproducible archive expansion, cache replay and unresolved gaps. The EIA manifest records unavailable issue pages separately from dates explicitly printed in the official archive index. Source denial stops new network requests; it does not cause guessed dates to be inserted.
+
+### Acquire individual contract settlements
+
+Follow the [Bloomberg lab guide](docs/bloomberg-export-guide.md) for a small CL/NG sample before requesting the full 2009-onward panel. An [existing local gas-workbook audit](docs/local-contract-data-audit.md) identifies useful contract history whose original price field still needs verification.
+
+Normalize permitted exports using the header-only `config/contract_master.example.csv` and `config/contract_prices.example.csv`, then run:
+
+```bash
+python -m src.contract_data \
+  --master /approved/path/contract_master.csv \
+  --prices /approved/path/contract_prices.csv \
+  --source "Bloomberg institutional lab" --price-field PX_SETTLE \
+  --output-dir /approved/path/contract_packages
+```
+
+The importer validates contract metadata and finite signed settlements, preserving zero and negative prices. It saves original bytes, normalized tables, coverage and checksum manifests in a new package. It does not alter the continuous-price database or certify calendar completeness, original vintages or research readiness. Raw licensed data stays outside Git.
 
 ## Run
 
@@ -157,6 +176,8 @@ Set `COT_LLM_MODEL_REVISION` to a fixed revision for reproducible model runs. Mo
 `src/ingest_cftc.py` and `src/ingest_prices.py` ingest inputs; `src/db.py` manages schema and transactional writes;
 `src/signals.py` is the single signal implementation; `src/backtest.py` produces descriptive evaluations;
 `src/pipeline.py` saves run manifests; `src/dashboard.py` displays results; `src/llm_anomaly.py` is optional.
+`src/research_audit.py` measures release-evidence coverage; `src/expand_cftc_history.py` and
+`src/expand_eia_history.py` reproduce reviewed history expansion; `src/contract_data.py` validates external contract exports.
 Root `signals.py` is a compatibility wrapper. `tests/` contains offline regression and Streamlit smoke tests.
 
 CI runs the locked Python 3.13 test suite. To refresh the lock deliberately:

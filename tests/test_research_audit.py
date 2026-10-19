@@ -37,7 +37,7 @@ def resolve(rows, dataset="disagg", market="CRUDE_OIL", report_date="2023-01-31"
     {"source": "https://user:password@example.com/source"},
     {"source": "file:///source"},
     {"dataset": "eia", "market": "*"},
-    {"status": "available_by"},
+    {"status": "available_by", "release_at": "2023-02-24T20:30:00Z"},
     {"report_date": "2008-01-01", "release_date": "2008-01-04"},
 ])
 def test_invalid_evidence_fails(tmp_path, change):
@@ -141,6 +141,14 @@ def test_conflicting_database_timestamp_excluded_from_overlap():
     report, events = audit_frames(frames, [entry()])
     assert report["inventory_overlap"] == []
     assert events[0]["metadata_conflict"]
+
+
+def test_cot_available_by_bound_does_not_invent_a_pre_release_cutoff(tmp_path):
+    evidence = load_evidence([ledger(tmp_path, [entry(status="available_by")])])
+    report, events = audit_frames(timing_frames(), evidence)
+    assert events[0]["evidence_status"] == "documented_by_date"
+    assert events[0]["availability_lower_bound"] is None
+    assert report["inventory_overlap"] == []
 
 
 def make_database(path):
