@@ -66,6 +66,8 @@ The corrected repository implements strict source-field validation, transactiona
 
 The current engine produces descriptive conditional underlying-return summaries. It does **not** implement the M0-M2 experiment, seasonal tightness, contract-level dollar outcomes, dependence-aware inference, or a costed portfolio. Continuous Yahoo close proxies lack the contract identity needed for the proposed design. Nonpositive-price windows are currently excluded, not economically modeled.
 
+The subsequent [research-data audit](research-data-audit.md) adds a bounded publication-evidence ledger and read-only coverage diagnostics. It does not establish a complete common sample or change evaluation eligibility. Current crude inventory is the national commercial-stock series; the proposed Cushing seasonal-state test requires a separate series. Archived gas issues also demonstrate revisions, so publication dates and original values require separate verification.
+
 The correction pass passed **141 offline tests**. A local engineering validation run, `20261016T014316Z-934738f8`, recorded:
 
 | Input or output | Count |

@@ -42,3 +42,9 @@ The full crude-oil Legacy history contains an upstream negative nonreportable-lo
 - Dependence-aware uncertainty estimates and a prospective forecasting record.
 
 No synthetic test result or ingestion count should be reported as a financial result in the manuscript.
+
+## Release-evidence audit follow-up
+
+On 18 October 2026 (America/New_York), the added read-only audit matched eight confirmed CFTC publication dates per market/report type, six crude-inventory issue dates and three secondary gas-publication available-by bounds against this same validation database. There are no exact timestamps in the pilot. No database metadata, signal eligibility or evaluation output was changed.
+
+The expanded suite passed **170 tests**, including date precision, daylight-saving boundaries, conflicting evidence, superseded schedules, conservative pre-release joins, input/output collision protection and database preservation. See the [audit report](research-data-audit.md) for coverage and remaining limitations. These checks establish diagnostic behavior, not readiness for the forecasting experiment.
