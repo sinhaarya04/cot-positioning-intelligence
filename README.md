@@ -6,15 +6,16 @@ An auditable Python pipeline for CFTC positioning data, EIA inventories, descrip
 
 ## Working paper and research documents
 
-**[What Does a COT Release Add? Public Positioning and Risk in Energy Futures](docs/working-paper.md)** is the current preliminary research-design and methods draft. It separates implemented software from the proposed forecasting experiment. Empirical results remain pending; this is not a completed or peer-reviewed empirical paper.
+**[Can Public Data Replace a COT Release? The Value of Delayed Positioning Disclosures](docs/working-paper.md)** is the current preliminary research-design and methods draft. It separates implemented software from the proposed forecasting experiment. Empirical results remain pending; this is not a completed or peer-reviewed empirical paper.
 
-- [Working-paper draft](docs/working-paper.md): research question, related work, hypotheses, proposed methods and outstanding evidence.
+- [Working-paper draft](docs/working-paper.md): matched report-versus-reconstruction comparisons, hypotheses, proposed methods and outstanding evidence.
+- [Closest-paper review and research gap](docs/literature-gap-review.md): methods and timing checks, version/access limitations, rejected novelty claims and feasibility gates (19 October 2026).
 - [Original research proposal (PDF)](docs/research-proposal.pdf): the 15 October 2026 planning brief, preserved as written before the correction pass. Its code-audit roadmap describes the earlier repository state; use this README and the working-paper draft for current implementation status.
 - [Validation record](docs/validation.md): engineering checks and live-data coverage, with no performance claims.
 - [Research-data audit](docs/research-data-audit.md): expanded release evidence, reproducible coverage diagnostics, vintage limitations and contract-data requirements.
 - [Bloomberg lab guide](docs/bloomberg-export-guide.md): a six-contract settlement pilot, field verification, export schemas and the import command.
 
-The intended contribution is the incremental forecasting information in a newly released COT report beyond a prespecified public-information baseline. Novelty and publication readiness still require empirical evidence and a fuller review of the closest papers.
+The proposed contribution measures whether public-data position estimates can replace an official COT disclosure for energy risk forecasts, and whether its value varies with pre-release reconstruction uncertainty. The closest-paper review narrows this claim; critical full-text access gaps, two-stage sample requirements and empirical validation remain unresolved.
 
 ## What the pipeline does
 
