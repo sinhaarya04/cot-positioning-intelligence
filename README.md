@@ -15,7 +15,7 @@ An auditable Python pipeline for CFTC positioning data, EIA inventories, descrip
 - [Research-data audit](docs/research-data-audit.md): expanded release evidence, reproducible coverage diagnostics, vintage limitations and contract-data requirements.
 - [Bloomberg lab guide](docs/bloomberg-export-guide.md): a six-contract settlement pilot, field verification, export schemas and the import command.
 
-The proposed contribution measures whether public-data position estimates can replace an official COT disclosure for energy risk forecasts, and whether its value varies with pre-release reconstruction uncertainty. The closest-paper review narrows this claim; critical full-text access gaps, two-stage sample requirements and empirical validation remain unresolved.
+The proposed contribution measures whether public-data position estimates can replace the reported managed-money statistic for energy risk forecasts, and whether its value varies with pre-release reconstruction uncertainty. Yu et al. (2023) has now been reviewed in full; its momentum comparisons strengthen the required baseline. Proskurin's full text, other close-paper checks, two-stage sample requirements and empirical validation remain unresolved. The primary experiment does not value every field of the entire COT release.
 
 ## What the pipeline does
 
