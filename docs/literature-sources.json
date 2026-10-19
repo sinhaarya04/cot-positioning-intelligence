@@ -465,6 +465,54 @@
       "visually_checked_pdf_pages_1_based": [
         7
       ]
+    },
+    {
+      "id": "mulligan_steenkamp_2018",
+      "url": "https://www.rbnz.govt.nz/-/media/project/sites/rbnz/files/publications/analytical-notes/2018/an2018-03.pdf",
+      "reviewed_on": "2026-10-19",
+      "access": "Official PDF read via web extraction; local HTTP retrieval returned 403",
+      "path": null,
+      "sha256": null,
+      "pages": 27,
+      "version_note": "RBNZ Analytical Note AN2018/03",
+      "reviewed_sections": [
+        "2: data and Tuesday alignment",
+        "4: equations 1–2 and Tables 2–5",
+        "5: equation 3 and Table 6, including notes",
+        "6: conclusion"
+      ],
+      "reviewed_method_and_result_pages_1_based": [
+        4,
+        5,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ],
+      "limitations": "Targeted timing/forecast review, not a full appendix audit. Screenshot requested but image inspection not confirmed; no visual-review claim.",
+      "title": "Reassessing the information content of the Commitments of Traders positioning data for exchange rate changes",
+      "authors": [
+        "Nicholas Mulligan",
+        "Daan Steenkamp"
+      ]
+    },
+    {
+      "id": "cftc_review_2026",
+      "url": "https://www.govinfo.gov/content/pkg/FR-2026-05-05/pdf/2026-08743.pdf",
+      "reviewed_on": "2026-10-19",
+      "access": "Official Federal Register PDF via web extraction",
+      "path": null,
+      "sha256": null,
+      "pages": 4,
+      "version_note": "Request for comment, 91 FR 24207–24210, May 5, 2026; institutional context, not a research study",
+      "reviewed_sections": [
+        "Summary and publication convention",
+        "III: questions 1–13, especially 1, 2, 6–7 and 10"
+      ],
+      "limitations": "No assertion about subsequent policy action. Does not establish causal effects of changing publication."
     }
   ]
 }
