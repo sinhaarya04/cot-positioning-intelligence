@@ -61,8 +61,8 @@ def load_evidence(paths):
                 raise ValueError("EIA evidence must identify an energy market")
             if row["status"] not in {"confirmed", "scheduled", "superseded", "available_by"}:
                 raise ValueError("Unknown evidence status")
-            if row["status"] == "available_by" and (row["dataset"] != "eia" or row["release_at"]):
-                raise ValueError("Available-by evidence must be an EIA document date without an inferred timestamp")
+            if row["status"] == "available_by" and row["release_at"]:
+                raise ValueError("Available-by evidence must be a document date without an inferred timestamp")
             report, release = _date(row["report_date"]), _date(row["release_date"])
             if release < report:
                 raise ValueError("Evidence publication precedes observation")
@@ -189,7 +189,9 @@ def audit_frames(frames, evidence):
         released = [e for e in events if e["market"] == market and not e["metadata_conflict"]
                     and (e["evidence_status"].startswith("confirmed_") or e["evidence_status"] == "documented_by_date")]
         stocks = [e for e in released if e["dataset"] == "eia"]
-        for cot in (e for e in released if e["dataset"] == "disagg"):
+        # A later document containing COT observations gives only an upper bound.
+        # Without a release lower bound we cannot freeze a pre-COT baseline.
+        for cot in (e for e in released if e["dataset"] == "disagg" and e["availability_lower_bound"]):
             cutoff = pd.Timestamp(cot["availability_lower_bound"])
             known = [e for e in stocks if pd.Timestamp(e["availability_upper_bound"]) < cutoff or (
                 e["evidence_status"] != "confirmed_timestamp" and pd.Timestamp(e["availability_upper_bound"]) == cutoff)]
@@ -255,7 +257,7 @@ def run_audit(db_path, evidence_paths, output_dir):
                    "limitations": [
                        "Curated evidence is partial; uncovered rows are not proof of absent historical publication.",
                        "Date-only evidence is an interval in America/New_York, never an exact release timestamp.",
-                       "Secondary EIA issue dates establish an available-by bound only; original release dates remain unknown.",
+                       "Secondary issue or correction-notice dates establish an available-by bound only; original release dates remain unknown.",
                        "No database release metadata or evaluation eligibility is changed by this audit.",
                        "Declared vintage labels are not reconciliation of values to original releases.",
                        "Inventory overlap is a timing diagnostic, not a validated feature or common research sample.",
