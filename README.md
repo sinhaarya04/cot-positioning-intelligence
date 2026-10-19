@@ -11,6 +11,7 @@ An auditable Python pipeline for CFTC positioning data, EIA inventories, descrip
 - [Working-paper draft](docs/working-paper.md): research question, related work, hypotheses, proposed methods and outstanding evidence.
 - [Original research proposal (PDF)](docs/research-proposal.pdf): the 15 October 2026 planning brief, preserved as written before the correction pass. Its code-audit roadmap describes the earlier repository state; use this README and the working-paper draft for current implementation status.
 - [Validation record](docs/validation.md): engineering checks and live-data coverage, with no performance claims.
+- [Research-data audit](docs/research-data-audit.md): a sourced release-evidence pilot, reproducible coverage diagnostics, vintage limitations and contract-data requirements.
 
 The intended contribution is the incremental forecasting information in a newly released COT report beyond a prespecified public-information baseline. Novelty and publication readiness still require empirical evidence and a fuller review of the closest papers.
 
@@ -67,6 +68,20 @@ export COT_RELEASE_CALENDAR=/absolute/path/to/verified-releases.csv
 ```
 
 Ingestion works without a calendar for descriptive inspection, but corrected evaluation excludes records without release evidence. No guessed calendar is bundled.
+
+### Audit partial evidence without changing the database
+
+The separate curated ledgers in `config/release_evidence_*.csv` distinguish confirmed publication dates, secondary-document available-by bounds, schedules and superseded schedules. They are a small audit pilot, **not** a complete release calendar. All currently bundled evidence is date-only; none is promoted to a timestamp or to backtest eligibility.
+
+After ingestion, audit an existing, checkpointed database:
+
+```bash
+python -m src.research_audit --db data/cot_intelligence.duckdb
+```
+
+The command opens the database read-only and writes `research-audit.json`, `research-audit.md` and `release-coverage.csv` under `output/research-audit/`. Use `--evidence path/to/ledger.csv` for alternative ledgers and `--output-dir` for another destination. A successful exit means the diagnostic completed; it does not establish research readiness. The evidence format is separate from `COT_RELEASE_CALENDAR` and must not be used as a replacement for its exact timestamps.
+
+The [audit findings](docs/research-data-audit.md) include the current national-crude versus proposed Cushing-series mismatch and a documented gas-inventory revision. The [contract-data specification](docs/contract-data-feasibility.md) records the price-panel fields and access still needed for the proposed experiment.
 
 ## Run
 
