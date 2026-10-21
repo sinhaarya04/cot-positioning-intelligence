@@ -1,6 +1,6 @@
 # Contract data feasibility and acquisition specification
 
-Reviewed 18 October 2026. This is a documentation audit, not evidence of an existing subscription or a complete research sample. No account was created, purchase made, or licensed dataset downloaded.
+Reviewed 18 October 2026; acquisition scope aligned with the revised design on 19 October 2026. This is a documentation audit, not evidence of an existing subscription or a complete research sample. No account was created, purchase made, or licensed dataset downloaded.
 
 ## Current gap
 
@@ -22,7 +22,7 @@ Use a separate contract panel; preserve the existing descriptive series. Require
 
 ## Verified candidate sources
 
-**Bloomberg lab access is the first route to test now.** The user can visit a lab. Bloomberg documents individual futures identifiers, contract tables, the `FUT_CHAIN` bulk field and historical `BDH` requests; its own benchmark methodology identifies `PX_SETTLE` as official settlement prices. These establish a plausible workflow, not verified expired-contract coverage or this lab's entitlements. The [lab export guide](bloomberg-export-guide.md) specifies a six-contract 2020 pilot, field lookup, canonical CSVs and a staged 2009-onward acquisition. [Bloomberg futures symbology](https://data.bloomberglp.com/professional/sites/4/BLPAPI-Core-User-Guide.pdf) · [Settlement field](https://assets.bbhub.io/professional/sites/10/Benchmark-Statement-Bloomberg-Futures-Tracker-Indices.pdf)
+**Bloomberg lab access is the first route to test now.** The user can visit a lab. Bloomberg documents individual futures identifiers, contract tables, the `FUT_CHAIN` bulk field and historical `BDH` requests; its own benchmark methodology identifies `PX_SETTLE` as official settlement prices. These establish a plausible workflow, not verified expired-contract coverage or this lab's entitlements. The [lab export guide](bloomberg-export-guide.md) specifies a six-contract 2020 pilot, field lookup, canonical CSVs and a staged acquisition of prices from 2008 onward, including a buffer before the post-September-2009 disclosure study. [Bloomberg futures symbology](https://data.bloomberglp.com/professional/sites/4/BLPAPI-Core-User-Guide.pdf) · [Settlement field](https://assets.bbhub.io/professional/sites/10/Benchmark-Statement-Bloomberg-Futures-Tracker-Indices.pdf)
 
 Confirm the institution's permitted processing and storage location before moving Bloomberg exports off the lab machine. Penn's current guide documents restrictions for Desktop API data; an older Calgary guide describes exports. Neither proves this user's applicable agreement. If local-machine restrictions apply, process on the authorized lab environment and export only permitted outputs. [Penn API guide](https://guides.library.upenn.edu/bloomberg/excel) · [Calgary guide](https://libguides.ucalgary.ca/ld.php?content_id=10215519)
 
@@ -44,8 +44,10 @@ The paper's target is `(exit_price - entry_price) * multiplier / past_dollar_vol
 
 ## Inventory and sample constraints
 
-The [validation record](validation.md) shows gas inventory starting in January 2010. A complete five-year seasonal reference makes the proposed seasonal feature available only around 2015; another five years of complete-feature training can move M2 evaluation toward 2020. These are approximate implications, not verified fold dates. Obtain earlier comparable released vintages or explicitly accept a shorter common sample; do not backfill missing early seasonal features with future information.
+The [validation record](validation.md) shows current gas-inventory ingestion starting in January 2010. Earlier comparable released values and availability evidence remain to be acquired; price history alone cannot extend the common information panel. The current primary design uses released national crude stocks and Lower-48 gas stocks as public predictors. Its seasonality controls do not imply that a five-year physical-tightness anomaly has already been constructed.
 
-Crude ingestion currently selects `PET.WCESTUS1.W`, the U.S. stock series, whereas the paper specifies Cushing. EIA's separate Cushing series begins in April 2004 on its historical page. Its original vintages and release evidence still need auditing; the current 1982 crude coverage does not establish Cushing coverage. Preserve both series with explicit identities and units. [EIA Cushing history](https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=W_EPC0_SAX_YCUOK_MBBL&f=W)
+Crude ingestion selects `PET.WCESTUS1.W`, U.S. commercial stocks excluding SPR. Cushing stocks are a different series and are now a deferred physical-tightness extension, not an asserted current primary requirement. The earlier five-year seasonal-history plus five-year downstream-training discussion concerned that extension. If revived, it needs its own original vintages, seasonal reference and sample audit. [EIA Cushing history](https://www.eia.gov/dnav/pet/hist/LeafHandler.ashx?n=PET&s=W_EPC0_SAX_YCUOK_MBBL&f=W)
+
+The four direct-predictor risk models in the revised working paper require a minimum five-year training period; reconstruction is a parallel diagnostic. A later downstream model using estimated positions still needs additional generated-feature history. Neither design has an established eligible sample. Match CFTC and EIA events by actual availability, including delayed releases and within-issue revisions, rather than treating a reference-week date as publication.
 
 Next acceptance gate: obtain an authorized sample covering several CL/NG maturities, expiry transitions, holidays and April 2020; validate schema, timestamps, signed prices and rights, then measure common coverage before implementing the forecasting experiment.

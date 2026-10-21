@@ -1,6 +1,54 @@
 # Bloomberg lab visit: CL and NG contract data
 
-Prepared 18 October 2026. This is an acquisition checklist, not evidence that a Bloomberg account, historical field, export entitlement or complete sample has been tested. Start with the small pilot below. The objective is individual NYMEX WTI crude oil and Henry Hub natural gas futures, with identified delivery months and daily settlements.
+Updated 19 October 2026 for the public-news/disclosure comparison. This is an acquisition checklist, not evidence that a Bloomberg account, historical field, export entitlement or complete sample has been tested. Start with the small pilot below. The objective is individual NYMEX WTI crude oil and Henry Hub natural gas futures, with identified delivery months and daily settlements.
+
+## Exact acquisition target for the revised experiment
+
+**First priority: individual-contract daily settlements and contract metadata for both markets.** The initial feasible specification uses public inputs available by Wednesday 00:00 New York (the Tuesday snapshot) and by 00:00 on the actual COT release date (normally the Thursday snapshot). All risk forecasts are issued after actual publication for the same subsequent contract outcome. Daily data support this conservative version; they do not establish the value of a report against every piece of information available immediately before Friday's announcement.
+
+### Required Bloomberg price package
+
+| Item | Exact request | Why it is needed |
+|---|---|---|
+| Markets | Standard NYMEX WTI crude oil futures, root CL; standard NYMEX Henry Hub natural gas futures, root NG; individually identified delivery contracts | Matches the two study markets and permits holding the same contract |
+| Trade-date range | 1 January 2008 through the last fully completed exchange session at the visit | A price-history buffer for 50-week momentum/volatility features before the post-September-2009 disclosure study; earlier prices do not make backfilled COT contemporaneously public |
+| Maturity coverage | Contracts needed to represent the first twelve listed monthly maturities on each historical date, including expired contracts and future delivery years at the end of the sample | Supports expiry selection and curve construction; twelve is an acquisition envelope, not twelve independent COT observations or twelve frozen model features |
+| Contract histories | Each resolved contract's available daily history within the requested date range; do not limit its history to its delivery year | Supplies same-contract history and overlapping maturities |
+| Price | Official daily settlement, `PX_SETTLE`, with exchange trade date | Constructs outcomes, price changes, volatility and curve spreads |
+| Identity and expiry | Exact Bloomberg security, stable ID if available, market/exchange, full delivery year/month, actual last-trade date, first-trade/listing date if available | Prevents decade ambiguity, continuous-series rolls and use of unlisted maturities |
+| Units | Currency, quote unit, contract size and dollar multiplier; tick size as supplementary metadata | Converts signed price changes into consistent contract-dollar outcomes |
+| Calendar | Historical NYMEX energy trading sessions, holidays, early closes and timezone | Counts the five-session horizon and ten-sessions-to-expiry rule |
+| Query/field evidence | Original formulas, date/frequency/missing-value options, exact returned field names and definitions, retrieval time, settlement status and historical availability documentation | Establishes what each value means and which snapshot may use it |
+
+The first-twelve target is a coverage request, not permission to use generic `CL1`–`CL12` or `NG1`–`NG12` without the underlying individual identities. If quotas constrain collection, validate the six-contract pilot first and request a coverage estimate for the full panel before batching. Do not silently replace the target with a shorter curve or sample.
+
+**Request daily volume and open interest alongside settlements if available.** They strengthen the public comparator, but the importer allows missing values. Save their observation dates, publication timing and revision conventions. A trade-date label does not mean the final count was known that day. Unknown availability means excluding or conservatively lagging that field under a frozen rule, never treating it as available by default. Do not sum the first twelve contracts' open interest and call it the all-maturity COT denominator.
+
+### Release information: ask for coverage and one original example first
+
+These are required research inputs, but do not all need to be acquired from Bloomberg. Official CFTC/EIA archives are the primary route; the lab is useful if it provides original issues, timestamps or better historical coverage.
+
+| Dataset | Values and event linkage needed | Date range |
+|---|---|---|
+| COT, Disaggregated futures-only | NYMEX WTI code `067651` and NYMEX Henry Hub code `023651`; managed-money long and short counts, total open interest, observation date, actual release date/time if evidenced, first-release values and corrections, publication-batch identity | September 2009 onward for the primary public-availability study; save any earlier backfill separately with its actual release evidence |
+| COT, Legacy futures-only controls | Same markets; commercial long and short counts and total open interest, with original releases/availability | Request 2008 onward where available to support lagged public controls |
+| EIA crude inventory | U.S. commercial crude stocks excluding the Strategic Petroleum Reserve, level and reported weekly change; observation week, actual issue date/time, units, values as first reported and revisions | Request 2008 onward, preserving actual available coverage |
+| EIA gas inventory | Lower-48 working gas in storage, level and reported weekly net change; observation week, actual issue date/time, Bcf units, values as first reported and revisions | Request 2008 onward, preserving actual available coverage |
+
+Preserve the previous-period figure printed in each inventory issue as well as the reported change. If that prior level was revised, subtracting two first-release levels from different issues need not reproduce the change announced in the later issue. Keep each original issue or its source identifier. The COT and EIA series need their own release clocks, not a weekly date join. [CFTC reports](https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm) · [EIA petroleum reports](https://www.eia.gov/petroleum/supply/weekly/) · [EIA gas reports](https://ir.eia.gov/ngs/ngs.html)
+
+The current primary model uses released inventories as public information. Cushing stocks and physical-tightness regimes are deferred; national crude stocks must not be relabelled Cushing. Original values are still a gate: a present-day historical download is not proof of what was announced then. If Bloomberg has only revised historical values, record that limitation rather than using them as first-release observations.
+
+### Optional additions, in this order
+
+1. **Archived EIA survey medians.** For the change in U.S. commercial crude stocks and the Lower-48 gas-storage change, request the median expectation recorded before each announcement, its units/sign convention, reference week, survey cutoff and actual release linkage. Keep the first actual figure beside it. This enables an inventory-surprise extension; it is not required for the initial four-model comparison. A later survey revision is not a pre-announcement expectation. No Bloomberg economic-series ticker or survey field is prescribed until its terminal definition and historical vintage support have been checked.
+2. **Intraday coverage feasibility.** Ask whether individual CL/NG contract histories spanning the research years include timestamped five-minute trade bars (OHLC, volume, bar-start/end convention and timezone) through actual COT release cutoffs, including holiday and delayed releases. Start with one event. This could support a separate exact-pre-release version; do not infer full historical coverage from a recent intraday screen. Exclude any bar extending past the chosen cutoff. Exact historical release times and public-feature availability remain necessary. The current daily study does not require a bulk tick-data export.
+
+### Workbook to retain
+
+Save the original Bloomberg workbook and a separate value-only copy in the lab-approved location. Use sheets named `Queries`, `Contract_Master`, `Daily_Prices`, `Sessions`, `Field_Definitions`, and `Availability_Notes`. Add `Release_History` and `Inventory_Surveys` only if those requests succeed. Record unsuccessful fields and date gaps. A wide layout is acceptable if every column keeps its contract, field and unit; preserve each date column.
+
+The two normalized CSVs below already have a validator. The session, availability, release and survey sheets are supporting evidence and do not yet have importers; do not append their columns to the strict price CSV. From this package we compute momentum, volatility, spreads, early/late snapshots and future outcomes ourselves. Daily prices must cover all sessions, including the days after release, rather than only Tuesdays and Fridays. Keep original signs, blanks and error messages; do not fill prices across missing days or contract expiries.
 
 ## First visit: the deliverable
 
@@ -100,7 +148,7 @@ The manifest distinguishes an explicit export timestamp from the import-time def
 
 ## After the pilot passes
 
-Request trade dates from **1 January 2009 through the latest completed session available at acquisition**. The pre-September 2009 prices provide a buffer for price features; Disaggregated COT publication starts later. Cover every monthly CL/NG maturity needed to construct the nearest eligible contract and the prespecified curve feature, including maturities beyond 2026 if needed for curves near the sample end. Begin with a target of the first twelve listed maturities at each historical date; this is an acquisition target, not a frozen model feature.
+Request trade dates from **1 January 2008 through the latest completed session available at acquisition**. This extends the earlier guide's January-2009 start to provide a full 50-week price-feature buffer before the post-September-2009 disclosure sample; it does not move the COT publication start earlier. Cover every monthly CL/NG maturity needed to construct the nearest eligible contract and the prespecified curve feature, including maturities beyond 2026 if needed for curves near the sample end. Begin with a target of the first twelve listed maturities at each historical date; this is an acquisition target, not a frozen model feature.
 
 For efficient collection, split requests by market and delivery year, retrieving each contract's available history intersected with the research date interval. Obtain the contract master first and reconcile expected delivery months against actual returned contracts. A contract may have traded long before its delivery year. Do not request only observations in the delivery year or infer old chains solely from today's active contracts. Check calendar coverage and point-in-time listing/expiry evidence separately.
 
